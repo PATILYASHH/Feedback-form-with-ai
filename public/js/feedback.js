@@ -19,6 +19,47 @@ async function checkAuth() {
     }
 }
 
+// Toggle dark mode on feedback card when anonymous checkbox is clicked
+const isAnonymousCheckbox = document.getElementById('isAnonymous');
+const feedbackCard = document.querySelector('.feedback-card');
+
+isAnonymousCheckbox.addEventListener('change', function() {
+    if (this.checked) {
+        // Calculate the position of checkbox relative to the card
+        const checkboxRect = this.getBoundingClientRect();
+        const cardRect = feedbackCard.getBoundingClientRect();
+        
+        // Calculate center position of checkbox
+        const checkboxCenterX = checkboxRect.left + checkboxRect.width / 2;
+        const checkboxCenterY = checkboxRect.top + checkboxRect.height / 2;
+        
+        // Calculate position relative to card
+        const relativeX = checkboxCenterX - cardRect.left;
+        const relativeY = checkboxCenterY - cardRect.top;
+        
+        // Set the ripple origin point in pixels
+        feedbackCard.style.setProperty('--ripple-x', `${relativeX}px`);
+        feedbackCard.style.setProperty('--ripple-y', `${relativeY}px`);
+        
+        // Add animating class for label glow
+        feedbackCard.classList.add('animating');
+        
+        // Add dark mode class to trigger the circular expansion
+        requestAnimationFrame(() => {
+            feedbackCard.classList.add('dark-mode');
+        });
+        
+        // Remove animating class after animation completes
+        setTimeout(() => {
+            feedbackCard.classList.remove('animating');
+        }, 1000);
+    } else {
+        // Remove dark mode - the circle will smoothly contract back
+        feedbackCard.classList.remove('dark-mode');
+        feedbackCard.classList.remove('animating');
+    }
+});
+
 const feedbackForm = document.getElementById('feedbackForm');
 const alertContainer = document.getElementById('alertContainer');
 const submitBtn = document.getElementById('submitBtn');

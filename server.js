@@ -285,8 +285,21 @@ app.post('/api/feedback/submit', async (req, res) => {
             sentiment: sentiment
         };
 
+        // Create authenticated client with user's token
+        const userSupabase = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_ANON_KEY,
+            {
+                global: {
+                    headers: {
+                        Authorization: `Bearer ${req.session.user.accessToken}`
+                    }
+                }
+            }
+        );
+
         // Insert feedback into database
-        const { data, error } = await supabase
+        const { data, error } = await userSupabase
             .from('feedback')
             .insert([feedbackData])
             .select();
@@ -311,7 +324,20 @@ app.get('/api/feedback/all', async (req, res) => {
             return res.status(403).json({ error: 'Access denied. Admin only.' });
         }
 
-        const { data, error } = await supabase
+        // Create authenticated client with user's token
+        const userSupabase = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_ANON_KEY,
+            {
+                global: {
+                    headers: {
+                        Authorization: `Bearer ${req.session.user.accessToken}`
+                    }
+                }
+            }
+        );
+
+        const { data, error } = await userSupabase
             .from('feedback')
             .select('*')
             .order('created_at', { ascending: false });
@@ -320,7 +346,7 @@ app.get('/api/feedback/all', async (req, res) => {
             return res.status(400).json({ error: error.message });
         }
 
-        res.json({ feedback: data });
+        res.json({ feedback: data || [] });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -333,7 +359,20 @@ app.get('/api/feedback/stats', async (req, res) => {
             return res.status(403).json({ error: 'Access denied. Admin only.' });
         }
 
-        const { data, error } = await supabase
+        // Create authenticated client with user's token
+        const userSupabase = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_ANON_KEY,
+            {
+                global: {
+                    headers: {
+                        Authorization: `Bearer ${req.session.user.accessToken}`
+                    }
+                }
+            }
+        );
+
+        const { data, error } = await userSupabase
             .from('feedback')
             .select('sentiment');
 
@@ -342,10 +381,10 @@ app.get('/api/feedback/stats', async (req, res) => {
         }
 
         const stats = {
-            total: data.length,
-            positive: data.filter(f => f.sentiment === 'positive').length,
-            negative: data.filter(f => f.sentiment === 'negative').length,
-            neutral: data.filter(f => f.sentiment === 'neutral').length
+            total: data?.length || 0,
+            positive: data?.filter(f => f.sentiment === 'positive').length || 0,
+            negative: data?.filter(f => f.sentiment === 'negative').length || 0,
+            neutral: data?.filter(f => f.sentiment === 'neutral').length || 0
         };
 
         res.json(stats);
@@ -384,13 +423,36 @@ app.get('/api/feedback/analytics', async (req, res) => {
             return res.status(403).json({ error: 'Access denied. Admin only.' });
         }
 
-        const { data, error } = await supabase
+        // Create authenticated client with user's token
+        const userSupabase = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_ANON_KEY,
+            {
+                global: {
+                    headers: {
+                        Authorization: `Bearer ${req.session.user.accessToken}`
+                    }
+                }
+            }
+        );
+
+        const { data, error } = await userSupabase
             .from('feedback')
             .select('*')
             .order('created_at', { ascending: false });
 
         if (error) {
             return res.status(400).json({ error: error.message });
+        }
+
+        // Handle empty feedback
+        if (!data || data.length === 0) {
+            return res.json({
+                topKeywords: [],
+                topFacultyIssues: [],
+                topSubjectIssues: [],
+                facultyStats: {}
+            });
         }
 
         // Extract common keywords from negative feedback
