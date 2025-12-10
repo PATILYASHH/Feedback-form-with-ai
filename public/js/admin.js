@@ -1,5 +1,6 @@
 let allFeedback = [];
 let currentFilter = 'all';
+let currentFaculty = 'all';
 
 // Check if user is admin
 async function checkAuth() {
@@ -51,6 +52,12 @@ async function loadFeedback() {
 
         allFeedback = data.feedback;
         
+        // Populate faculty filter
+        const faculties = [...new Set(allFeedback.map(f => f.faculty_name))].sort();
+        const facultyFilter = document.getElementById('facultyFilter');
+        facultyFilter.innerHTML = '<option value="all">All Faculties</option>' +
+            faculties.map(f => `<option value="${f}">${f}</option>`).join('');
+        
         // Hide loading spinner
         document.getElementById('loadingSpinner').style.display = 'none';
         document.getElementById('feedbackTableContainer').style.display = 'block';
@@ -63,6 +70,65 @@ async function loadFeedback() {
                 <i class="bi bi-exclamation-triangle"></i> Error loading feedback data.
             </div>
         `;
+    }
+}
+
+// Load analytics data
+async function loadAnalytics() {
+    try {
+        const response = await fetch('/api/feedback/analytics');
+        const data = await response.json();
+
+        // Display top issues
+        const topIssuesContainer = document.getElementById('topIssuesContainer');
+        const topIssuesList = document.getElementById('topIssuesList');
+        const facultyIssuesList = document.getElementById('facultyIssuesList');
+
+        if (data.topKeywords && data.topKeywords.length > 0) {
+            topIssuesContainer.style.display = 'block';
+            
+            topIssuesList.innerHTML = data.topKeywords.map(item => `
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-exclamation-circle text-danger"></i> ${item.keyword}</span>
+                    <span class="badge bg-danger rounded-pill">${item.count}</span>
+                </div>
+            `).join('');
+
+            facultyIssuesList.innerHTML = data.topFacultyIssues.map(item => `
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <span style="font-size: 0.9rem;">${item.issue}</span>
+                    <span class="badge bg-warning rounded-pill">${item.count}</span>
+                </div>
+            `).join('');
+        }
+
+        // Display faculty stats
+        const facultyStatsContainer = document.getElementById('facultyStatsContainer');
+        const facultyStatsBody = document.getElementById('facultyStatsBody');
+
+        if (data.facultyStats && Object.keys(data.facultyStats).length > 0) {
+            facultyStatsContainer.style.display = 'block';
+            
+            facultyStatsBody.innerHTML = Object.entries(data.facultyStats)
+                .sort((a, b) => b[1].total - a[1].total)
+                .map(([faculty, stats]) => {
+                    const score = ((stats.positive - stats.negative) / stats.total * 100).toFixed(1);
+                    const scoreClass = score > 0 ? 'text-success' : score < 0 ? 'text-danger' : 'text-warning';
+                    
+                    return `
+                        <tr>
+                            <td><strong>${faculty}</strong></td>
+                            <td>${stats.total}</td>
+                            <td><span class="text-success">${stats.positive}</span></td>
+                            <td><span class="text-danger">${stats.negative}</span></td>
+                            <td><span class="text-warning">${stats.neutral}</span></td>
+                            <td><strong class="${scoreClass}">${score}%</strong></td>
+                        </tr>
+                    `;
+                }).join('');
+        }
+    } catch (error) {
+        console.error('Error loading analytics:', error);
     }
 }
 
@@ -114,8 +180,9 @@ function displayFeedback(feedbackList) {
 }
 
 // Filter feedback
-function filterFeedback(sentiment) {
+function filterFeedback(sentiment = currentFilter, faculty = currentFaculty) {
     currentFilter = sentiment;
+    currentFaculty = faculty;
     
     // Update active button
     document.querySelectorAll('.filter-btn').forEach(btn => {
@@ -126,12 +193,17 @@ function filterFeedback(sentiment) {
     });
     
     // Filter and display
-    if (sentiment === 'all') {
-        displayFeedback(allFeedback);
-    } else {
-        const filtered = allFeedback.filter(f => f.sentiment === sentiment);
-        displayFeedback(filtered);
+    let filtered = allFeedback;
+    
+    if (sentiment !== 'all') {
+        filtered = filtered.filter(f => f.sentiment === sentiment);
     }
+    
+    if (faculty !== 'all') {
+        filtered = filtered.filter(f => f.faculty_name === faculty);
+    }
+    
+    displayFeedback(filtered);
 }
 
 // Refresh all data
@@ -141,6 +213,7 @@ async function refreshData() {
     
     await loadStats();
     await loadFeedback();
+    await loadAnalytics();
 }
 
 // Handle logout
@@ -162,8 +235,13 @@ async function handleLogout() {
 // Setup filter buttons
 document.querySelectorAll('.filter-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-        filterFeedback(btn.dataset.filter);
+        filterFeedback(btn.dataset.filter, currentFaculty);
     });
+});
+
+// Setup faculty filter
+document.getElementById('facultyFilter').addEventListener('change', (e) => {
+    filterFeedback(currentFilter, e.target.value);
 });
 
 // Initialize on page load
@@ -171,6 +249,7 @@ async function init() {
     await checkAuth();
     await loadStats();
     await loadFeedback();
+    await loadAnalytics();
 }
 
 init();

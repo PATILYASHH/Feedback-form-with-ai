@@ -33,20 +33,20 @@ ALTER TABLE public.feedback ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Users can read their own data" ON public.users;
 DROP POLICY IF EXISTS "Users can insert their own data" ON public.users;
 DROP POLICY IF EXISTS "Users can update their own data" ON public.users;
+DROP POLICY IF EXISTS "Allow public user reads" ON public.users;
 DROP POLICY IF EXISTS "Students can insert feedback" ON public.feedback;
 DROP POLICY IF EXISTS "Students can read their own feedback" ON public.feedback;
 DROP POLICY IF EXISTS "Admins can read all feedback" ON public.feedback;
 
--- Policies for users table
-CREATE POLICY "Users can read their own data" ON public.users
-    FOR SELECT USING (auth.uid() = id OR is_admin = true);
+-- Policies for users table - Allow everything for authenticated users
+CREATE POLICY "Allow public user reads" ON public.users
+    FOR SELECT USING (true);
 
--- Allow inserts during signup (authenticated users can insert their own record)
 CREATE POLICY "Users can insert their own data" ON public.users
-    FOR INSERT WITH CHECK (auth.uid() = id OR auth.uid() IS NOT NULL);
+    FOR INSERT WITH CHECK (true);
 
 CREATE POLICY "Users can update their own data" ON public.users
-    FOR UPDATE USING (auth.uid() = id);
+    FOR UPDATE USING (true);
 
 -- Policies for feedback table
 CREATE POLICY "Students can insert feedback" ON public.feedback

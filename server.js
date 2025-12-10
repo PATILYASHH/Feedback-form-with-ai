@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
+const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
@@ -14,12 +15,6 @@ const supabase = createClient(
     process.env.SUPABASE_ANON_KEY
 );
 
-// Initialize Supabase Admin client (bypasses RLS)
-const supabaseAdmin = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
@@ -28,7 +23,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'your-secret-key',
+    secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
     resave: false,
     saveUninitialized: false,
     cookie: { secure: false } // Set to true if using HTTPS
@@ -56,20 +51,39 @@ app.post('/api/auth/signup', async (req, res) => {
             return res.status(400).json({ error: authError.message });
         }
 
-        // Insert user details into users table using admin client to bypass RLS
-        const { error: dbError } = await supabaseAdmin
+        // Create authenticated client with the new user's token
+        const userSupabase = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_ANON_KEY,
+            {
+                global: {
+                    headers: {
+                        Authorization: `Bearer ${authData.session?.access_token}`
+                    }
+                }
+            }
+        );
+
+        // Check if this is the admin email
+        const isAdmin = email === 'yashpatil@admin.com';
+
+        // Insert user details into users table using authenticated client
+        const { error: dbError } = await userSupabase
             .from('users')
             .insert([
                 { 
                     id: authData.user.id,
                     email, 
-                    name,
-                    is_admin: false
+                    name: isAdmin ? 'Yash Patil (Admin)' : name,
+                    is_admin: isAdmin
                 }
             ]);
 
         if (dbError) {
-            return res.status(400).json({ error: dbError.message });
+            // Ignore if user already exists
+            if (!dbError.message.includes('duplicate') && !dbError.message.includes('unique')) {
+                return res.status(400).json({ error: dbError.message });
+            }
         }
 
         res.json({ 
@@ -95,20 +109,101 @@ app.post('/api/auth/login', async (req, res) => {
             return res.status(401).json({ error: error.message });
         }
 
-        // Get user details from database
-        const { data: userData, error: userError } = await supabase
+        // Create authenticated supabase client with user's token
+        const userSupabase = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_ANON_KEY,
+            {
+                global: {
+                    headers: {
+                        Authorization: `Bearer ${data.session.access_token}`
+                    }
+                }
+            }
+        );
+
+        // Get user details from database using authenticated client
+        let { data: userData, error: userError } = await userSupabase
             .from('users')
             .select('*')
             .eq('id', data.user.id)
-            .single();
+            .maybeSingle();
 
-        if (userError) {
-            return res.status(400).json({ error: userError.message });
+        // If user not found, try by email
+        if (!userData && !userError) {
+            const result = await userSupabase
+                .from('users')
+                .select('*')
+                .eq('email', data.user.email)
+                .maybeSingle();
+            
+            userData = result.data;
+            userError = result.error;
+        }
+
+        // If still not found, create the user
+        if (!userData && !userError) {
+            // Check if this is the admin email
+            const isAdmin = data.user.email === 'yashpatil@admin.com';
+            
+            const { data: newUser, error: insertError } = await userSupabase
+                .from('users')
+                .insert([{
+                    id: data.user.id,
+                    email: data.user.email,
+                    name: isAdmin ? 'Yash Patil (Admin)' : data.user.email.split('@')[0],
+                    is_admin: isAdmin
+                }])
+                .select()
+                .maybeSingle();
+
+            if (!insertError && newUser) {
+                userData = newUser;
+            } else if (insertError) {
+                // One more attempt - try to fetch again
+                const retryResult = await userSupabase
+                    .from('users')
+                    .select('*')
+                    .eq('email', data.user.email)
+                    .maybeSingle();
+                
+                if (retryResult.data) {
+                    userData = retryResult.data;
+                    
+                    // Update admin status if this is the admin email
+                    if (isAdmin && !userData.is_admin) {
+                        await userSupabase
+                            .from('users')
+                            .update({ is_admin: true, name: 'Yash Patil (Admin)' })
+                            .eq('id', userData.id);
+                        
+                        userData.is_admin = true;
+                        userData.name = 'Yash Patil (Admin)';
+                    }
+                } else {
+                    return res.status(400).json({ error: 'Could not create or find user record' });
+                }
+            }
+        }
+
+        // Ensure admin status for yashpatil@admin.com
+        if (userData && userData.email === 'yashpatil@admin.com' && !userData.is_admin) {
+            await userSupabase
+                .from('users')
+                .update({ is_admin: true, name: 'Yash Patil (Admin)' })
+                .eq('id', userData.id);
+            
+            userData.is_admin = true;
+            userData.name = 'Yash Patil (Admin)';
+        }
+
+        if (!userData) {
+            return res.status(400).json({ error: 'User record not found' });
         }
 
         req.session.user = {
-            id: data.user.id,
-            email: data.user.email,
+            id: userData.id,
+            email: userData.email,
             name: userData.name,
             isAdmin: userData.is_admin,
             accessToken: data.session.access_token
@@ -277,6 +372,93 @@ app.get('/api/feedback/my-feedback', async (req, res) => {
         }
 
         res.json({ feedback: data });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get top issues and analytics (Admin only)
+app.get('/api/feedback/analytics', async (req, res) => {
+    try {
+        if (!req.session.user || !req.session.user.isAdmin) {
+            return res.status(403).json({ error: 'Access denied. Admin only.' });
+        }
+
+        const { data, error } = await supabase
+            .from('feedback')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            return res.status(400).json({ error: error.message });
+        }
+
+        // Extract common keywords from negative feedback
+        const negativeFeedback = data.filter(f => f.sentiment === 'negative');
+        const keywords = {};
+        const facultyIssues = {};
+        const subjectIssues = {};
+
+        negativeFeedback.forEach(feedback => {
+            const text = feedback.feedback_text.toLowerCase();
+            const faculty = feedback.faculty_name;
+            const subject = feedback.subject;
+
+            // Common issue patterns
+            const patterns = [
+                'pc', 'computer', 'laptop', 'system', 'lab', 'projector', 
+                'ac', 'fan', 'light', 'bench', 'chair', 'board', 'marker',
+                'wifi', 'internet', 'network', 'not working', 'broken', 'damaged'
+            ];
+
+            patterns.forEach(pattern => {
+                if (text.includes(pattern)) {
+                    keywords[pattern] = (keywords[pattern] || 0) + 1;
+                    
+                    // Track by faculty
+                    const key = `${pattern} - ${faculty}`;
+                    facultyIssues[key] = (facultyIssues[key] || 0) + 1;
+                }
+            });
+
+            // Track by subject
+            const subjectKey = `${subject} - ${faculty}`;
+            subjectIssues[subjectKey] = (subjectIssues[subjectKey] || 0) + 1;
+        });
+
+        // Sort and get top issues
+        const topKeywords = Object.entries(keywords)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10)
+            .map(([keyword, count]) => ({ keyword, count }));
+
+        const topFacultyIssues = Object.entries(facultyIssues)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10)
+            .map(([issue, count]) => ({ issue, count }));
+
+        const topSubjectIssues = Object.entries(subjectIssues)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10)
+            .map(([subject, count]) => ({ subject, count }));
+
+        // Faculty-wise sentiment breakdown
+        const facultyStats = {};
+        data.forEach(feedback => {
+            const faculty = feedback.faculty_name;
+            if (!facultyStats[faculty]) {
+                facultyStats[faculty] = { positive: 0, negative: 0, neutral: 0, total: 0 };
+            }
+            facultyStats[faculty][feedback.sentiment]++;
+            facultyStats[faculty].total++;
+        });
+
+        res.json({
+            topKeywords,
+            topFacultyIssues,
+            topSubjectIssues,
+            facultyStats
+        });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
