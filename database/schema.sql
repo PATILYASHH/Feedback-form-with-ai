@@ -52,16 +52,8 @@ CREATE POLICY "Users can update their own data" ON public.users
 CREATE POLICY "Students can insert feedback" ON public.feedback
     FOR INSERT WITH CHECK (true);
 
-CREATE POLICY "Students can read their own feedback" ON public.feedback
-    FOR SELECT USING (
-        student_id = auth.uid() OR 
-        EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND is_admin = true)
-    );
-
-CREATE POLICY "Admins can read all feedback" ON public.feedback
-    FOR SELECT USING (
-        EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND is_admin = true)
-    );
+CREATE POLICY "Allow authenticated users to read feedback" ON public.feedback
+    FOR SELECT USING (auth.uid() IS NOT NULL);
 
 -- Insert admin user (you'll need to create this user in Supabase Auth first)
 -- Then link it here. For now, we'll create a placeholder.

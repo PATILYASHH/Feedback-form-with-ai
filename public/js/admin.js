@@ -5,20 +5,27 @@ let currentFaculty = 'all';
 // Check if user is admin
 async function checkAuth() {
     try {
+        console.log('Checking authentication...');
         const response = await fetch('/api/auth/status');
         const data = await response.json();
+        
+        console.log('Auth response:', data);
 
         if (!data.authenticated) {
+            console.log('Not authenticated, redirecting to login');
             window.location.href = '/login.html';
             return;
         }
 
         if (!data.user.isAdmin) {
+            console.log('Not admin, redirecting to feedback page');
             alert('Access denied. Admin only.');
             window.location.href = '/feedback.html';
             return;
         }
 
+        console.log('Admin authenticated:', data.user.name);
+        
         // Display admin name
         document.getElementById('adminName').innerHTML = `
             <i class="bi bi-person-circle"></i> ${data.user.name}
@@ -38,7 +45,6 @@ async function loadStats() {
         document.getElementById('totalFeedback').textContent = data.total;
         document.getElementById('positiveFeedback').textContent = data.positive;
         document.getElementById('negativeFeedback').textContent = data.negative;
-        document.getElementById('neutralFeedback').textContent = data.neutral;
     } catch (error) {
         console.error('Error loading stats:', error);
     }
@@ -48,9 +54,17 @@ async function loadStats() {
 async function loadFeedback() {
     try {
         const response = await fetch('/api/feedback/all');
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `HTTP ${response.status}`);
+        }
+        
         const data = await response.json();
 
-        allFeedback = data.feedback;
+        allFeedback = data.feedback || [];
+        
+        console.log('Loaded feedback:', allFeedback.length, 'items');
         
         // Populate faculty filter
         const faculties = [...new Set(allFeedback.map(f => f.faculty_name))].sort();
@@ -67,7 +81,7 @@ async function loadFeedback() {
         console.error('Error loading feedback:', error);
         document.getElementById('loadingSpinner').innerHTML = `
             <div class="alert alert-danger">
-                <i class="bi bi-exclamation-triangle"></i> Error loading feedback data.
+                <i class="bi bi-exclamation-triangle"></i> Error loading feedback data: ${error.message}
             </div>
         `;
     }
@@ -113,7 +127,7 @@ async function loadAnalytics() {
                 .sort((a, b) => b[1].total - a[1].total)
                 .map(([faculty, stats]) => {
                     const score = ((stats.positive - stats.negative) / stats.total * 100).toFixed(1);
-                    const scoreClass = score > 0 ? 'text-success' : score < 0 ? 'text-danger' : 'text-warning';
+                    const scoreClass = score > 0 ? 'text-success' : 'text-danger';
                     
                     return `
                         <tr>
@@ -121,7 +135,6 @@ async function loadAnalytics() {
                             <td>${stats.total}</td>
                             <td><span class="text-success">${stats.positive}</span></td>
                             <td><span class="text-danger">${stats.negative}</span></td>
-                            <td><span class="text-warning">${stats.neutral}</span></td>
                             <td><strong class="${scoreClass}">${score}%</strong></td>
                         </tr>
                     `;
@@ -134,15 +147,19 @@ async function loadAnalytics() {
 
 // Display feedback in table
 function displayFeedback(feedbackList) {
+    console.log('displayFeedback called with:', feedbackList);
+    
     const tbody = document.getElementById('feedbackTableBody');
     const noDataMessage = document.getElementById('noDataMessage');
     
     if (feedbackList.length === 0) {
+        console.log('No feedback to display');
         tbody.innerHTML = '';
         noDataMessage.style.display = 'block';
         return;
     }
     
+    console.log('Displaying', feedbackList.length, 'feedback items');
     noDataMessage.style.display = 'none';
     
     tbody.innerHTML = feedbackList.map((feedback, index) => {
@@ -167,9 +184,7 @@ function displayFeedback(feedbackList) {
                 </td>
                 <td>
                     <span class="sentiment-badge ${feedback.sentiment}">
-                        ${feedback.sentiment === 'positive' ? '<i class="bi bi-emoji-smile"></i>' : 
-                          feedback.sentiment === 'negative' ? '<i class="bi bi-emoji-frown"></i>' : 
-                          '<i class="bi bi-emoji-neutral"></i>'}
+                        ${feedback.sentiment === 'positive' ? '<i class="bi bi-emoji-smile"></i>' : '<i class="bi bi-emoji-frown"></i>'}
                         ${feedback.sentiment}
                     </span>
                 </td>
@@ -246,10 +261,16 @@ document.getElementById('facultyFilter').addEventListener('change', (e) => {
 
 // Initialize on page load
 async function init() {
+    console.log('Admin dashboard initializing...');
     await checkAuth();
+    console.log('Auth check complete');
     await loadStats();
+    console.log('Stats loaded');
     await loadFeedback();
+    console.log('Feedback loaded');
     await loadAnalytics();
+    console.log('Analytics loaded');
 }
 
+console.log('Starting admin dashboard...');
 init();

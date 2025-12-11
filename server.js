@@ -238,8 +238,16 @@ async function analyzeSentiment(feedbackText) {
     try {
         const model = genAI.getGenerativeModel({ model: "gemini-pro" });
         
-        const prompt = `Analyze the following student feedback and categorize it as either "positive", "negative", or "neutral". 
-        Respond with ONLY one word: positive, negative, or neutral.
+        const prompt = `Analyze the following student feedback and categorize it as ONLY "positive" or "negative". 
+        There is NO neutral option - you must choose one or the other.
+        
+        Rules:
+        - If the feedback contains any praise, appreciation, satisfaction, or positive comments: respond "positive"
+        - If the feedback contains complaints, criticism, dissatisfaction, or suggestions for improvement: respond "negative"
+        - If mixed, lean towards the dominant sentiment
+        - When in doubt, if they're giving constructive feedback or pointing out issues: respond "negative"
+        
+        Respond with ONLY one word: positive or negative.
         
         Feedback: "${feedbackText}"`;
 
@@ -247,14 +255,14 @@ async function analyzeSentiment(feedbackText) {
         const response = await result.response;
         const sentiment = response.text().trim().toLowerCase();
         
-        // Validate response
-        if (['positive', 'negative', 'neutral'].includes(sentiment)) {
-            return sentiment;
+        // Validate response - only accept positive or negative
+        if (sentiment === 'positive') {
+            return 'positive';
         }
-        return 'neutral'; // Default fallback
+        return 'negative'; // Default to negative if not clearly positive
     } catch (error) {
         console.error('Gemini API Error:', error);
-        return 'neutral'; // Fallback on error
+        return 'negative'; // Fallback on error
     }
 }
 
@@ -343,9 +351,11 @@ app.get('/api/feedback/all', async (req, res) => {
             .order('created_at', { ascending: false });
 
         if (error) {
+            console.error('Error fetching feedback:', error);
             return res.status(400).json({ error: error.message });
         }
 
+        console.log('Fetched feedback:', data ? data.length : 0, 'items');
         res.json({ feedback: data || [] });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -383,8 +393,7 @@ app.get('/api/feedback/stats', async (req, res) => {
         const stats = {
             total: data?.length || 0,
             positive: data?.filter(f => f.sentiment === 'positive').length || 0,
-            negative: data?.filter(f => f.sentiment === 'negative').length || 0,
-            neutral: data?.filter(f => f.sentiment === 'neutral').length || 0
+            negative: data?.filter(f => f.sentiment === 'negative').length || 0
         };
 
         res.json(stats);
@@ -509,7 +518,7 @@ app.get('/api/feedback/analytics', async (req, res) => {
         data.forEach(feedback => {
             const faculty = feedback.faculty_name;
             if (!facultyStats[faculty]) {
-                facultyStats[faculty] = { positive: 0, negative: 0, neutral: 0, total: 0 };
+                facultyStats[faculty] = { positive: 0, negative: 0, total: 0 };
             }
             facultyStats[faculty][feedback.sentiment]++;
             facultyStats[faculty].total++;
